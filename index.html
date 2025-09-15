@@ -1,0 +1,161 @@
+<!doctype html>
+<html lang="vi">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>Tái tim roi</title>
+<style>
+  html,body {height:100%;margin:0;background:#0b1020;display:flex;align-items:center;justify-content:center;}
+  canvas{display:block;width:100vw;height:100vh;}
+  .hint{position:fixed;left:10px;top:10px;color:#eee;font-family:Inter, system-ui, sans-serif;background:rgba(0,0,0,0.25);padding:6px 8px;border-radius:6px;font-size:13px}
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<div class="hint">Nh?n Space d? tang/s gi?m s? tim • Click d? t?o d?t</div>
+<script>
+(() => {
+  const canvas = document.getElementById('c');
+  const ctx = canvas.getContext('2d');
+  let DPR = Math.min(window.devicePixelRatio || 1, 2);
+  function resize(){ 
+    DPR = Math.min(window.devicePixelRatio || 1, 2);
+    canvas.width = Math.floor(window.innerWidth * DPR);
+    canvas.height = Math.floor(window.innerHeight * DPR);
+    canvas.style.width = window.innerWidth + 'px';
+    canvas.style.height = window.innerHeight + 'px';
+    ctx.setTransform(DPR,0,0,DPR,0,0);
+  }
+  window.addEventListener('resize', resize);
+  resize();
+
+  // params
+  let PARTICLES = 400; // m?c d?nh — thay d?i n?u mu?n. 400 là mu?t.
+  const MAX_PARTICLES = 20000; // practical cap
+  const gravity = 0.03;
+  const windBase = 0.02;
+
+  // helper: create heart shape path on a temporary canvas for speed
+  const heartCanvas = document.createElement('canvas');
+  heartCanvas.width = 64; heartCanvas.height = 64;
+  const hctx = heartCanvas.getContext('2d');
+  function drawHeartIcon(color='rgba(255,80,120,0.95)'){
+    hctx.clearRect(0,0,64,64);
+    hctx.save();
+    hctx.translate(32,28);
+    hctx.scale(0.14,0.14);
+    hctx.beginPath();
+    hctx.moveTo(0,0);
+    hctx.bezierCurveTo(0,-40, -60,-40, -60,0);
+    hctx.bezierCurveTo(-60,40, 0,70, 0,95);
+    hctx.bezierCurveTo(0,70,60,40,60,0);
+    hctx.bezierCurveTo(60,-40,0,-40,0,0);
+    hctx.closePath();
+    hctx.fillStyle = color;
+    hctx.shadowColor = color;
+    hctx.shadowBlur = 6;
+    hctx.fill();
+    hctx.restore();
+  }
+  drawHeartIcon();
+
+  // particle system
+  const particles = [];
+  function newParticle(x,y,scale=1){
+    const s = Math.max(0.4, Math.random()*1.4) * scale;
+    return {
+      x: x !== undefined ? x : Math.random()*canvas.width/DPR,
+      y: y !== undefined ? y : -10 - Math.random()*200,
+      vx: (Math.random()-0.5) * 0.6,
+      vy: Math.random()*0.6 + 0.2,
+      rot: Math.random()*Math.PI*2,
+      vr: (Math.random()-0.5)*0.02,
+      life: 0,
+      scale: s,
+      opacity: 0.7 + Math.random()*0.3,
+      hueShift: (Math.random()*40 - 20)
+    };
+  }
+
+  function spawnBurst(n, x, y){
+    for(let i=0;i<n;i++){
+      if(particles.length >= MAX_PARTICLES) break;
+      particles.push(newParticle(x || undefined, y || undefined, 0.6 + Math.random()*1.6));
+    }
+  }
+
+  // initial fill (visual impression like many hearts)
+  spawnBurst(PARTICLES);
+
+  // controls
+  window.addEventListener('keydown', (e)=>{
+    if(e.code === 'Space'){ 
+      // toggle: increase to big or back
+      if(PARTICLES < 2000){ PARTICLES = Math.min(2000, PARTICLES*3); spawnBurst(PARTICLES); }
+      else { PARTICLES = 400; particles.length = 0; spawnBurst(PARTICLES); }
+      e.preventDefault();
+    }
+    if(e.key === '+' || e.key === '='){ spawnBurst(60); }
+    if(e.key === '-'){ particles.splice(0,60); }
+  });
+  canvas.addEventListener('click', (ev)=>{
+    const rect = canvas.getBoundingClientRect();
+    const x = (ev.clientX - rect.left);
+    const y = (ev.clientY - rect.top);
+    spawnBurst(80, x, y);
+  });
+
+  let last = performance.now();
+  function tick(now){
+    const dt = Math.min(40, now - last);
+    last = now;
+    ctx.clearRect(0,0,canvas.width,canvas.height);
+
+    // subtle background glow
+    ctx.fillStyle = 'rgba(6,8,20,0.55)';
+    ctx.fillRect(0,0,canvas.width/DPR,canvas.height/DPR);
+
+    // wind that slowly varies
+    const wind = Math.sin(now/2000)*windBase;
+
+    // update and draw particles
+    for(let i = particles.length -1; i >= 0; i--){
+      const p = particles[i];
+      p.vy += gravity * (dt/16);
+      p.vx += wind * (dt/16) * (0.5 + Math.random()*0.5);
+      p.x += p.vx * (dt/16) * 20;
+      p.y += p.vy * (dt/16) * 20;
+      p.rot += p.vr * (dt/16) * 20;
+      p.life += dt;
+
+      // fade when reaching bottom
+      if(p.y > canvas.height/DPR + 50 || p.x < -100 || p.x > canvas.width/DPR + 100 || p.life > 120000) {
+        particles.splice(i,1);
+        continue;
+      }
+
+      ctx.save();
+      ctx.globalAlpha = Math.min(1, p.opacity);
+      // color shift for variety
+      const hue = 340 + p.hueShift;
+      ctx.translate(p.x, p.y);
+      ctx.rotate(p.rot);
+      const sz = 18 * p.scale;
+      // draw heart raster scaled
+      ctx.drawImage(heartCanvas, -sz/2, -sz/2, sz, sz);
+      ctx.restore();
+    }
+
+    // ensure baseline count
+    while(particles.length < PARTICLES){
+      particles.push(newParticle());
+    }
+
+    requestAnimationFrame(tick);
+  }
+
+  requestAnimationFrame(tick);
+})();
+</script>
+</body>
+</html>
